@@ -1,0 +1,1198 @@
+<?xml version="1.0"?>
+<!DOCTYPE article PUBLIC "-//Norman Walsh//DTD DocBk XML V3.1.3//EN">
+
+<!-- @version $Id: walk.sgml,v 1.1 2012/01/16 18:48:00 cs162 Exp $ -->
+
+<article>
+
+<artheader>
+<title>A Guide to Nachos 5.0j</title>
+
+<author>
+<firstname>Dan</firstname>
+<surname>Hettena</surname>
+</author>
+
+<author>
+<firstname>Rick</firstname>
+<surname>Cox</surname>
+<affiliation>
+<address><email>rick@rescomp.berkeley.edu</email></address>
+</affiliation>
+</author>
+
+<!--
+<copyright>
+<year>2001</year>
+<holder>University of California, Berkeley</holder>
+</copyright>
+-->
+
+<abstract>
+
+<para>
+
+We have ported the Nachos instructional operating system
+[<ulink url="http://http.cs.berkeley.edu/~tea/nachos/nachos.ps">1</ulink>] to Java,
+and in the process of doing so, many details changed (hopefully for the
+better).
+[<ulink url="http://www.cs.duke.edu/~narten/110/nachos/main/main.html">2</ulink>]
+remains an excellent resource for learning about the C++ versions of Nachos,
+but an update is necessary to account for the differences between the Java
+version and the C++ versions.
+
+</para>
+
+<para>
+
+We attempt to describe Nachos 5.0j in the same way that
+[<ulink url="http://www.cs.duke.edu/~narten/110/nachos/main/main.html">2</ulink>]
+described previous versions of Nachos, except that we defer some of the
+details to the Javadoc-generated documentation. We do not claim any originality
+in this documentation, and freely offer any deserved credit to Narten.
+
+</para>
+</abstract>
+
+</artheader>
+
+<!-- Document Text -->
+
+<sect1>
+<title>Nachos and the Java Port</title>
+<para>
+
+The Nachos instructional operating system, developed at Berkeley, was first
+tested on guinea pig students in 1992
+[<ulink
+url="http://http.cs.berkeley.edu/~tea/nachos/nachos.ps">1</ulink>]. The
+authors intended it to be a simple, yet realistic, project for undergraduate
+operating systems classes. Nachos is now in wide use.
+
+</para><para>
+
+The original Nachos, written in a subset of C++ (with a little assembly), ran
+as a regular UNIX process. It simulated the hardware devices of a simple
+computer: it had a timer, a console, a MIPS R3000 processor, a disk, and a
+network link. In order to achieve reasonable performance, the operating system
+kernel ran natively, while user processes ran on the simulated processor.
+Because it was simulated, multiple Nachos instances could run on the same
+physical computer.
+
+</para>
+<sect2>
+<title>Why Java?</title>
+
+<para>
+Despite the success of Nachos, there are good reasons to believe that it would
+be more useful in Java:
+</para>
+
+<itemizedlist>
+<listitem><para>Java is much simpler than C++. It is not necessary to restrict Nachos to a
+subset of the language; students can understand the whole language.</para></listitem>
+<listitem><para>Java is type-safe. C++ is not type-safe; it is possible for a C++ program
+to perform a legal operation (e.g. writing off the end of an array) such that
+the operation of the program can no longer be described in terms of the C++
+language. This turns out to be a major problem; some project groups are unable
+to debug their projects within the alotted time, primarily because of bugs not
+at all related to operating systems concepts.</para></listitem>
+<listitem><para>It is much more reasonable to machine-grade a Java project than a C++
+project.</para></listitem>
+<listitem><para>Many undergraduate data structures classes, including the one at Berkeley,
+now use Java, not C++; students know Java well.</para></listitem>
+<listitem><para>Java is relatively portable. Nachos 4.0 uses unportable assembly to support
+multithreading. Adding a new target to Nachos 4.0 required writing a bit of
+additional code for the port.</para></listitem>
+</itemizedlist>
+
+</sect2>
+<sect2>
+<title>Will it work?</title>
+
+<para>
+One of the first concerns many people have about Java is its speed. It is an
+undebatable fact that Java programs run slower than their C++ equivalents. This
+statement can be misleading, though:
+</para>
+
+<itemizedlist>
+<listitem><para>Compiling is a significant part of the Nachos 4.0 debug cycle. Because
+javac compiles as much as it can everytime it is invoked, Nachos 5.0j actually
+compiles faster than Nachos 4.0 (running on a local disk partition with no
+optimizations enabled).</para></listitem>
+<listitem><para>Generating large files on network partitions further slows down the debug
+cycle. Nachos 5.0j's .class files are significantly smaller than Nachos
+4.0's .o files, even when compiling with -Os. This is in part due to C++
+templates, which, without a smart compiler or careful management, get very big.</para></listitem>
+<listitem><para>Type-safe languages are widely known to make debugging cycles more
+effective.</para></listitem>
+</itemizedlist>
+
+<para>
+Another common concern is that writing an operating system in a type-safe
+language is unrealistic. In short, it <emphasis>is</emphasis> unrealistic, but not as
+unrealistic as you might think. Two aspects of real operating systems are lost
+by using Java, but neither are critical:
+</para>
+
+<itemizedlist>
+<listitem><para>Since the JVM provides threads for Nachos 5.0j, the context switch
+code is no longer exposed. In Nachos 4.0, students could read the
+assembly code used to switch between threads. But, as mentioned above,
+this posed a portability problem.</para></listitem>
+
+<listitem><para>The kernel can allocate kernel
+memory without releasing it; the garbage collector will release it. In
+Linux, this would be similar to removing all calls to
+<function>kfree</function>. This, however, is conceptually one of the simplest
+forms of resource allocation within the kernel (there's a lot more to
+Linux than <function>kmalloc</function> and <function>kfree</function>). The Nachos kernel
+must still directly manage the allocation of physical pages among
+processes, and must close files when processes exit, for example.
+</para></listitem>
+
+</itemizedlist>
+</sect2>
+</sect1>
+
+<sect1>
+<title>Nachos Machine</title>
+<para>
+
+Nachos simulates a real CPU and harware devices, including interrupts
+and memory management. The Java package
+<type>nachos.machine</type> provides this simulation.
+
+</para>
+
+
+<sect2>
+<title>Configuring Nachos</title>
+<para>
+
+The nachos simulation is configured for the various projects using the
+<filename>nachos.conf</filename> file (for the most part, this file is
+equivelant to the BIOS or OpenFirmware configuration of modern PCs or
+Macintoshes). It specifies which hardware devices to include in the
+simulation as well as which Nachos kernel to use. The project
+directories include appropriate configurations, and, where neccessary,
+the project handouts document any changes to this file required to complete the
+project.
+
+</para>
+</sect2>
+
+
+<sect2>
+<title>Boot Process</title>
+<para>
+
+The nachos boot process is similar to that of a real machine. An
+instance of the nachos.machine.Machine class is created to begin
+booting. The hardware (Machine object) first initializes the devices
+including the interrupt controller, timer, elevator controller, MIPS
+processor, console, and file system.
+
+</para>
+<para>
+
+The Machine object then hands control to the particular AutoGrader in
+use, an action equivelant to loading the bootstrap code from the boot
+sector of the disk. It is the AutoGrader that creates a Nachos kernel,
+starting the operating system. Students need not worry about this step
+in the boot process - the interesting part begins with the kernel.
+
+</para>
+<para>
+
+A Nachos kernel is just a subclass of
+<type>nachos.machine.Kernel</type>. For instance, the thread
+project uses <type>nachos.threads.ThreadedKernel</type> (and later
+projects inherit from <type>ThreadedKernel</type>). 
+
+</para>
+
+
+</sect2>
+<sect2>
+<title>Nachos Hardware Devices</title>
+<para>
+
+The Nachos machine simulation includes several hardware devices. Some
+would be found in most modern computers (e.g. the network interface),
+while others (such as the elevator controller) are unique to
+Nachos. Most classes in the <filename>machine</filename> directory are
+part of the hardware simulation, while all classes outside that
+directory are part of the Nachos operating system.
+
+</para>
+
+<sect3>
+<title>Interrupt Management</title>
+
+<para>
+The <type>nachos.machine.Interrupt</type> class simulates interrupts by maintaining an event queue
+together with a simulated clock. As the clock ticks, the event queue is
+examined to find events scheduled to take place now. The interrupt controller
+is returned by <function>Machine.interrupt()</function>.
+</para>
+<para>
+The clock is maintained entirely in software and ticks only under the
+following conditions:
+</para>
+
+<itemizedlist>
+<listitem><para>Every time interrupts are re-enabled (i.e. only when interrupts are
+disabled and get enabled again), the clock advances 10 ticks. Nachos code
+frequently disables and restores interrupts for mutual exclusion
+purposes by making explicit calls to <function>disable()</function> and
+<function>restore()</function>.
+</para></listitem>
+<listitem><para>Whenever the MIPS simulator executes one instruction, the clock advances
+one tick.</para></listitem>
+</itemizedlist>
+
+<note><para>Nachos C++ users: Nachos C++ allowed the simulated time to be advanced
+to that of the next interrupt whenever the ready list is empty. This provides
+a small performance gain, but it creates unnatural interaction between the
+kernel and the hardware, and it is unnecessary (a normal OS uses an idle
+thread, and this is exactly what Nachos does now).
+</para></note>
+
+<para>
+Whenever the clock advances, the event queue is examined and any pending
+interrupt events are serviced by invoking the device event handler associated
+with the event. Note that this handler is <emphasis>not</emphasis> an interrupt handler
+(a.k.a. interrupt service routine). Interrupt handlers are part of software,
+while device event handlers are part of the hardware simulation. A device
+event handler will <emphasis>invoke</emphasis> the software interrupt handler for the device,
+as we will see later. For this reason, the <type>Interrupt</type> class disables
+interrupts before calling a device event handler.
+
+</para>
+
+<caution><para>
+Due to a bug in the current release of Nachos, <emphasis>only the timer
+interrupt handler may cause a context switch</emphasis> (the problem is that a few
+device event handlers are not reentrant; in order for an interrupt handler to
+be allowed to do a context switch, the device event handler that invoked it
+must be reentrant). All interrupt handlers besides the timer interrupt handler
+must not directly or indirectly cause a context switch before returning, or
+deadlock may occur. However, you probably won't even want to context switch in
+any other interrupt handler anyway, so this should not be a problem.
+</para></caution>
+
+<para>
+The <type>Interrupt</type> class accomplishes the above through three methods.
+These methods are only accessible to hardware simulation devices.
+</para>
+
+<itemizedlist>
+<listitem><para><function>schedule()</function> takes a time and a device event
+handler as arguments, and schedules the specified handler to be called at the
+specified time.</para></listitem>
+<listitem><para><function>tick()</function> advances the time by 1 tick or 10 ticks,
+depending on whether Nachos is in user mode or kernel mode. It is called by
+<function>setStatus()</function> whenever interrupts go from being disabled to being
+enabled, and also by <function>Processor.run()</function> after each user instruction is
+executed.</para></listitem>
+<listitem><para><function>checkIfDue()</function> invokes event handlers for
+queued events until no more events are due to occur. It is invoked by
+<function>tick()</function>.</para></listitem>
+</itemizedlist>
+
+<para>
+The <type>Interrupt</type> class also simulates the hardware interface to enable and disable
+interrupts (see the Javadoc for <type>Interrupt</type>).
+</para>
+ 
+<para>
+The remainder of the hardware devices present in Nachos depend on the Interrupt device. No
+hardware devices in Nachos create threads, thus, the only time the code in the device classes
+execute is due to a function call by the running <type>KThread</type> or due to an interrupt 
+handler executed by the <type>Interrupt</type> object.
+</para>
+
+</sect3>
+
+<sect3>
+<title>Timer</title>
+
+<para>
+Nachos provides an instance of a <type>Timer</type> to simulate a real-time clock,
+generating interrupts at regular intervals. It is implemented using the event
+driven interrupt mechanism described above. <function>Machine.timer()</function> returns
+a reference to this timer.
+</para>
+
+<para>
+<type>Timer</type> supports only two operations:
+</para>
+
+<itemizedlist>
+<listitem><para><function>getTime()</function> returns the number of
+ticks since Nachos started.
+</para></listitem>
+<listitem><para><function>setInterruptHandler()</function> sets the timer interrupt handler, which is
+invoked by the simulated timer approximately every <varname>Stats.TimerTicks</varname>
+ticks.</para></listitem>
+</itemizedlist>
+
+<para>
+The timer can be used to provide preemption. Note however that the timer
+interrupts do not always occur at exactly the same intervals. Do not rely on
+timer interrupts being equally spaced; instead, use <function>getTime()</function>.
+</para>
+
+</sect3>
+
+<sect3>
+<title>Serial Console</title>
+
+<para>
+Nachos provides three classes of I/O devices with read/write interfaces, of
+which the simplest is the serial console. The serial console, specified by
+the <type>SerialConsole</type> class, simulates the behavior of a serial port. It
+provides byte-wide read and write primitives that never block. The machine's
+serial console is returned by <function>Machine.console()</function>.
+
+</para><para>
+The read operation tests if a byte of data is ready to be returned. If so, it
+returns the byte immediately, and otherwise it returns -1. When another byte of
+data is received, a receive interrupt occurs. Only one byte can be queued at a
+time, so it is not possible for two receive interrupts to occur without an
+intervening read operation.
+
+</para><para>
+The write operation starts transmitting a byte of data and returns immediately.
+When the transmission is complete and another byte can be sent, a send
+interrupt occurs. If two writes occur without an intervening send interrupt,
+the actual data transmitted is undefined (so the kernel should always wait for
+a send interrupt first).
+
+</para><para>
+Note that the receive interrupt handler and send interrupt handler are provided
+by the kernel, by calling <function>setInterruptHandlers()</function>.
+
+</para><para>
+Implementation note: in a normal Nachos session, the serial console is
+implemented by class <type>StandardConsole</type>, which uses stdin and stdout.
+It schedules a read device event every <constant>Stats.ConsoleTime</constant> ticks to
+poll stdin for another byte of data. If a byte is present, it stores it and
+invokes the receive interrupt handler.
+</para>
+</sect3>
+
+<sect3>
+<title>Disk</title>
+<para>
+The file systems project has not yet been ported, so the disk has not been
+tested.</para>
+</sect3>
+
+<sect3>
+<title>Network Link</title>
+
+<para>
+Separate Nachos instances running on the same real-life machine can communicate
+with each other over a network, using the <type>NetworkLink</type> class. An
+instance of this class is returned by <function>Machine.networkLink()</function>.
+
+</para><para>
+The network link's interface is similar to the serial console's interface,
+except that instead of receiving and sending bytes at a time, the network link
+receives and sends packets at a time. Packets are instances of the
+<type>Packet</type> class.
+
+</para><para>
+Each network link has a <emphasis>link address</emphasis>, a number that uniquely identifies
+the link on the network. The link address is returned by
+<function>getLinkAddress()</function>.
+
+</para><para>
+A packet consists of a header and some data bytes. The header specifies the
+link address of the machine sending the packet (the source link address), the
+link address of the machine to which the packet is being sent (the destination
+link address), and the number of bytes of data contained in the packet. The
+data bytes are not analyzed by the network hardware, while the header is. When
+a link transmits a packet, it transmits it only to the link specified in the
+destination link address field of the header. Note that the source address can
+be forged.
+
+</para><para>
+The remainder of the interface to <type>NetworkLink</type> is equivalent to that of
+<type>SerialConsole</type>. The kernel can check for a packet by calling
+<function>receive()</function>, which returns <constant>null</constant> if no packet is available.
+Whenever a packet arrives, a receive interrupt is generated. The kernel can
+send a packet by calling <function>send()</function>, but it must wait for a send interrupt
+before attempting to send another packet.
+</para>
+
+</sect3>
+
+</sect2>
+</sect1>
+
+<sect1>
+<title>Threads and Scheduling</title>
+<para>
+
+Nachos provides a kernel threading package, allowing multiple tasks to
+run concurrently (see
+<type>nachos.threads.ThreadedKernel</type> and
+<type>nachos.threads.KThread</type>). Once the user-prcesses
+are implmented (phase 2), some threads may be running the
+MIPS processor simulation. As the scheduler and thread package are
+concerned, there is no difference between a thread running the MIPS
+simulation and one running just kernel Java code.
+
+</para>
+
+<sect2>
+<title>Thread Package</title>
+
+<para>
+
+All Nachos threads are instances of
+<type>nachos.threads.KThread</type> (threads capable of running
+user-level MIPS code are a subclass of KThread,
+<type>nachos.userprog.UThread</type>).  A
+<type>nachos.machine.TCB</type> object is contained by each KThread
+and provides low-level support for context switches, thread creation,
+thread destruction, and thread yield.
+
+</para>
+
+<para>
+
+Every KThread has a <varname>status</varname> member that tracks the
+state of the thread. Certain KThread methods will fail
+(with a <function>Lib.assert()</function>) if called on threads in the wrong
+state; check the <type>KThread</type> Javadoc for details. 
+
+</para>
+<variablelist>
+
+<varlistentry><term><varname>statusNew</varname></term>
+<listitem>
+<para>
+A newly created, yet to be forked thread.
+</para>
+</listitem>
+</varlistentry>
+
+<varlistentry><term><varname>statusReady</varname></term>
+<listitem>
+<para>
+A thread waiting for access to the
+CPU. <function>KThread.ready()</function> will add the thread to the
+ready queue and set the status to <varname>statusReady</varname>.
+</para>
+</listitem>
+</varlistentry>
+
+<varlistentry><term><varname>statusRunning</varname></term>
+<listitem>
+<para>
+The thread currently using the
+CPU. <function>KThread.restoreState()</function> is responsible for
+setting <varname>status</varname> to
+<varname>statusRunning</varname>, and is called by
+<function>KThread.runNextThread()</function>.
+</para>
+</listitem>
+</varlistentry>
+
+<varlistentry><term><varname>statusBlocked</varname></term>
+<listitem>
+<para>
+A thread which is asleep (as set by
+<function>KThread.sleep()</function>), waiting on some resource besides
+the CPU.
+</para>
+</listitem>
+</varlistentry>
+
+<varlistentry><term><varname>statusFinished</varname></term>
+<listitem>
+<para>
+A thread scheduled for destruction. Use
+<function>KThread.finish()</function> to set this status.
+</para>
+</listitem>
+</varlistentry>
+
+</variablelist>
+
+<para>
+
+Internally, Nachos implements threading using a Java thread for each
+TCB. The Java threads are synchronized by the TCBs such that exactly
+one is running at any given time. This provides the illusion of
+context switches saving state for the current thread and loading the
+saved state of the new thread. This detail, however, is only important
+for use with debuggers (which will show multiple Java threads), as the
+behavior is equivelant to a context switch on a real processor.
+
+</para>
+
+</sect2>
+<sect2>
+<title>Scheduler</title>
+<para>
+
+A sub-class (specified in the <filename>nachos.conf</filename>) of the
+abstract base class <type>nachos.threads.Scheduler</type> is
+responsible for scheduling threads for all limited resources, be it
+the CPU, a synchronization construct like a lock, or even a thread
+join operation. For each resource a
+<type>nachos.threads.ThreadQueue</type> is created by
+<function>Scheduler.newThreadQueue()</function>. The implementation of
+the resource (e.g. <type>nachos.threads.Semaphore</type>
+class) is responsible for adding KThreads to the ThreadQueue
+(<function>ThreadQueue.waitForAccess()</function>) and requesting the
+ThreadQueue return the next thread
+(<function>ThreadQueue.nextThread()</function>). Thus, all scheduling
+decisions (including those regarding the CPU's ready queue) reduce to the
+selection of the next thread by the ThreadQueue
+objects<footnote><para>The ThreadQueue object representing the ready
+queue is stored in the static variable
+<varname>KThread.readyQueue</varname>.</para></footnote>.
+
+</para>
+<para>
+
+Various phases of the project will require modifications to the
+scheduler base class. The
+<type>nachos.threads.RoundRobinScheduler</type> is the
+default, and implements a fully functional (though naive) FIFO
+scheduler. Phase 1 of the projects requires the student to complete
+the <type>nachos.threads.PriorityScheduler</type>; for phase
+2, students complete
+<type>nachos.threads.LotteryScheduler</type>.
+
+</para>
+
+</sect2>
+
+<sect2>
+<title>Creating the First Thread</title>
+<para>
+
+Upto the point where the Kernel is created, the boot process is fairly
+easy to follow - Nachos is just making Java objects, same as any other
+Java program. Also like any other single-threaded Java program, Nachos
+code is executing on the initial Java thread created automaticaly for
+it by Java. <function>ThreadedKernel.initialize()</function> has
+the task of starting threading:
+
+</para>
+<programlisting>
+public void initialize(String[] args) {
+      ...
+      // start threading
+      new KThread(null);
+      ...
+}
+</programlisting>
+<para>
+
+The first clue that something special is happening should be that the
+new <type>KThread</type> object created is not stored in a variable inside
+<function>initialize()</function>. The constructor for
+<type>KThread</type> follows the following procedure the first time it
+is called:
+
+</para>
+
+<procedure>
+
+<step><para>Create the ready queue (<function>ThreadedKernel.scheduler.newThreadQueue()</function>).</para></step>
+
+<step><para>Allocate the CPU to the new <type>KThread</type> object being
+created (<function>readyQueue.acquire(this)</function>).</para></step>
+
+<step><para>Set <varname>KThread.currentThread</varname> to the new
+<type>KThread</type> being made.</para></step>
+
+<step><para>Set the TCB object of the new <type>KThread</type> to
+<function>TCB.currentTCB()</function>. In doing so, the currently
+running Java thread is assigned to the new <type>KThread</type>
+object being created.</para></step>
+
+<step><para>Change the <varname>status</varname>
+of the new <type>KThread</type> from the default
+(<constant>statusNew</constant>) to
+<constant>statusRunning</constant>. This bypasses the
+<constant>statusReady</constant> state.
+</para></step>
+
+<step><para>Create an idle thread.</para>
+<substeps>
+     <step><para>Make another new <type>KThread</type>, with the
+     target set to an infinite <function>yield()</function>
+     loop.</para></step>
+     <step><para>Fork the idle thread off from the main
+     thread.</para></step>
+</substeps>
+</step>
+
+</procedure>
+
+<para>
+
+After this procedure, there are two <type>KThread</type> objects, each
+with a <type>TCB</type> object (one for the main thread, and one for
+the idle thread). The main thread is not special - the scheduler
+treats it exactly like any other <type>KThread</type>. The main thread
+can create other threads, it can die, it can block. The Nachos session
+will not end until all <type>KThread</type>s finish, regardless of whether
+the main thread is alive.
+
+</para>
+<para>
+
+For the most part the idle thread is also a normal thread, which can be
+contexted switched like any other. The only difference is it will
+never be added to the ready queue
+(<function>KThread.ready()</function> has an explicit check for the
+idle thread). Instead, if
+<function>readyQueue.nextThread()</function> returns
+<constant>null</constant>, the thread system will switch to the idle thread.
+
+</para>
+
+<note><para>While the Nachos idle thread does nothing but
+<function>yield()</function> forever, some systems use the idle thread
+ to do work. One common use is zeroing memory to prepare it for
+reallocation.</para></note>
+
+</sect2>
+
+<sect2>
+<title>Creating More Threads</title>
+<para>
+Creating subsequent threads is much simpler. As described
+in the <type>KThread</type> Javadoc, a new <type>KThread</type>
+is created, passing the constructor a <type>Runnable</type> object. Then,
+<function>fork()</function> is called:
+</para>
+<programlisting>
+KThread newThread = new KThread(myRunnable);
+...
+newThread.fork();
+</programlisting>
+<para>
+This sequence results in the new thread being placed on the ready queue. The currently
+running thread does not immediatly yield, however.
+</para>
+
+<sect3>
+<title>Java Anonymous Classes in Nachos</title>
+<para>
+The Nachos source is relatively clean, using only basic Java, with the exception 
+of the use of anonymous classes to replicate the functionality of 
+function pointers in C++. The following code illustrates the use of an anonymous class
+to create a new KThread object which, when forked, will execute the 
+<function>myFunction()</function> method of the encolosing object.
+</para>
+<programlisting>
+Runnable myRunnable = new Runnable() {
+		public void run() {
+		    myFunction();
+		}
+	    };
+KThread newThread = new KThread(myRunnable);
+</programlisting>
+<para>
+This code creates a new object of type <type>Runnable</type> inside the context of the
+enclosing object. Since <varname>myRunnable</varname> has no method 
+<function>myFunction()</function>, executing <function>myRunnable.run()</function>
+will cause Java to look in the enclosing class for a <function>myFunction()</function> method.
+</para>
+</sect3>
+
+</sect2>
+
+<sect2>
+<title>On Thread Death</title>
+<para>
+
+All threads have some resources allocated to them which are neccessary
+for the thread to run (e.g. the <type>TCB</type> object).  Since the
+thread itself cannot deallocate these resources while it is running,
+it leaves a virtual will asking the next thread which runs to
+deallocate its resources.  This is implemented in
+<function>KThread.finish()</function>, which sets
+<varname>KThread.toBeDestroyed</varname> to the currently running
+thread. It then sets current thread's <varname>status</varname> field
+to <constant>statusFinished</constant> and calls
+<function>sleep()</function>.
+
+</para>
+<para>
+Since the thread is not waiting on a <type>ThreadQueue</type> object,
+its sleep will be permanent (that is, Nachos will never try to wake
+the thread). This scheme does, however, require that after every
+context switch, the newly running thread must check
+<varname>toBeDestroyed</varname>.
+</para>
+
+<note><para>
+In the C++ version of Nachos, thread death was
+complicated by the explicit memory deallocation required, combined
+with dangling references that still pointing to the thread after death
+(for example, most thread <function>join()</function> implementations
+requires some reference to the thread). In Java, the garbage collector
+is responsible for noticing when these references are detached,
+significantly simplifying the thread finishing process.
+</para></note>
+
+</sect2>
+
+</sect1>
+
+<sect1>
+<title>The Nachos Simulated MIPS Machine</title>
+
+<para>
+Nachos simulates a machine with a processor that roughly approximates the MIPS
+architecture. In addition, an event-driven simulated clock provides a mechanism
+to schedule events and execute them at a later time. This is a building block
+for classes that simulate various hardware devices: a timer, an elevator bank,
+a console, a disk, and a network link.
+
+</para>
+<para>
+The simulated MIPS processor can execute arbitrary programs. One simply loads
+instructions into the processor's memory, initializes registers (including
+the program counter, regPC) and then tells the processor to start executing
+instructions. The processor then fetches the instruction that regPC points at,
+decodes it, and executes it. The process is repeated indefinitely, until either
+an instruction causes an exception or a hardware interrupt is generated. When
+an exception or interrupt takes place, execution of MIPS instructions is
+suspended, and a Nachos interrupt service routine is invoked to deal with the
+condition.
+
+</para>
+<para>
+
+Conceptually, Nachos has two modes of execution, one of which is the MIPS
+simulator. Nachos executes user-level processes by loading them into the
+simulator's memory, initializing the simulator's registers and then running the
+simulator. User-programs can only access the memory associated with the
+simulated processor. The second mode corresponds to the Nachos "kernel". The
+kernel executes when Nachos first starts up, or when a user-program executes an
+instruction that causes an exception (e.g., illegal instruction, page fault,
+system call, etc.). In kernel mode, Nachos executes the way normal Java
+programs execute. That is, the statements corresponding to the Nachos source
+code are executed, and the memory accessed corresponds to the memory assigned
+to Nachos variables. 
+
+</para>
+
+<sect2>
+<title>Processor Components</title>
+<para>
+
+The Nachos/MIPS processor is implemented by the <type>Processor</type> class, an
+instance of which is created when Nachos first starts up. The
+<type>Processor</type> class exports a number of public methods and fields that the
+Nachos kernel accesses directly. In the following, we describe some of the
+important variables of the <type>Processor</type> class; describing their role
+helps explain what the simulated hardware does.
+
+</para>
+<para>
+The processor provides registers and physical memory, and supports virtual
+memory. It provides operations to run the machine and to examine and
+modify its current state. When Nachos first starts up, it creates an
+instance of the <type>Processor</type> class and makes it available through
+<function>Machine.processor()</function>. The following aspects of the processor are
+accessible to the Nachos kernel:
+</para>
+
+<variablelist>
+
+<varlistentry><term>Registers</term>
+<listitem><para>
+The processor's registers are accessible through
+<function>readRegister()</function> and <function>writeRegister()</function>. The registers include
+MIPS registers 0 through 31, the low and high registers used for multiplication
+and division, the program counter and next program counter registers (two are
+necessary because of branch delay slots), a register specifying the cause of
+the most recent exception, and a register specifying the virtual memory address
+associated with the most recent exception. Recall that the stack pointer
+register and return address registers are general MIPS registers (specifically,
+they are registers 29 and 31, respectively). Recall also that r0 is always 0
+and cannot be modified.
+</para></listitem>
+</varlistentry>
+
+<varlistentry><term>Physical memory</term>
+<listitem><para>
+Memory is byte-addressable and organized into
+1-kilobyte pages, the same size as disk sectors. A reference to the main
+memory array is returned by <function>getMemory()</function>. Memory corresponding to
+physical address <varname>m</varname> can be accessed in Nachos at
+<function>Machine.processor().getMemory()[m]</function>. The number of pages of physical
+memory is returned by <function>getNumPhysPages()</function>.
+</para></listitem>
+</varlistentry>
+
+<varlistentry><term>Virtual memory</term>
+<listitem><para>
+The processor supports VM through either a
+single linear page table or a software-managed TLB (but not both). The mode
+of address translation is actually used is determined by <filename>nachos.conf</filename>,
+and is returned by <function>hasTLB()</function>. If the processor does not have a TLB, the
+kernel can tell it what page table to use by calling <function>setPageTable()</function>.
+If the processor does have a TLB, the kernel can query the size of the TLB by
+calling <function>getTLBSize()</function>, and the kernel can read and write TLB entries by
+calling <function>readTLBEntry()</function> and <function>writeTLBEntry()</function>.
+</para></listitem>
+</varlistentry>
+
+<varlistentry><term>Exceptions</term>
+<listitem><para>
+When the processor attempts to execute an instruction
+and it results in an exception, the kernel exception handler is invoked. The
+kernel must tell the processor where this exception handler is by invoking
+<function>setExceptionHandler()</function>. If the exception resulted from a syscall
+instruction, it is the kernel's responsibility to advance the PC register,
+which it should do by calling <function>advancePC()</function>.
+</para></listitem>
+</varlistentry>
+
+</variablelist>
+
+<para>
+At this point, we know enough about the <type>Processor</type> class to explain
+how it executes arbitrary user programs. First, we load the program's
+instructions into the processor's physical memory (i.e. the array returned by
+<function>getMemory()</function>). Next, we initialize the processor's page table and
+registers. Finally, we invoke <function>run()</function>, which begins the fetch-execute
+cycle for the processor.
+
+</para><para>
+<function>run()</function> causes the processor to enter an infinite fetch-execute loop.
+This method should only be called after the registers and memory have been
+properly initialized. Each iteration of the loop does three things:
+</para>
+
+<orderedlist>
+<listitem><para>It attempts to run an instruction. This should be very familiar to students
+who have studied the generic 5-stage MIPS pipeline. Note that when an exception
+occurs, the pipline is aborted.
+</para>
+<orderedlist>
+<listitem><para>The 32-bit instruction is fetched from memory, by reading the word of
+virtual memory pointed to by the PC register. Reading virtual memory can cause
+an exception.</para></listitem>
+<listitem><para>The instruction is decoded by looking at its 6-bit <varname>op</varname> field and
+looking up the meaning of the instruction in one of three tables.
+</para></listitem>
+<listitem><para>The instruction is executed, and data memory reads and writes occur. An
+exception can occur if an arithmetic error occurs, if the instruction is
+invalid, if the instruction was a syscall, or if a memory operand could not be
+accessed.</para></listitem>
+<listitem><para>The registers are modified to reflect the completion
+of the instruction.</para></listitem>
+</orderedlist>
+</listitem>
+
+<listitem><para>If an exception occurred, handle it. The cause of the exception is written
+to the cause register, and if the exception involved a bad virtual address,
+this address is written to the bad virtual address register. If a delayed load
+is in progress, it is completed. Finally, the kernel's exception handler is
+invoked.</para></listitem>
+
+<listitem><para>It advances the simulated clock (the clock, used to simulate interrupts, is
+discussed in the following section).</para></listitem>
+</orderedlist>
+
+<para>
+Note that from a user-level process's perspective, exceptions take place in
+the same way as if the program were executing on a bare machine; an
+exception handler is invoked to deal with the problem. However, from our
+perspective, the kernel's exception handler is actually called via a normal
+procedure call by the simulated processor.
+
+</para>
+<para>
+The processor provides three methods we have not discussed yet:
+<function>makeAddress()</function>, <function>offsetFromAddress()</function>, and
+<function>pageFromAddress()</function>. These are utility procedures that help the kernel
+go between virtual addresses and virtual-page/offset pairs.
+</para>
+
+</sect2>
+<sect2>
+<title>Address Translation</title>
+<para>
+The simulated processor supports one of two address translation modes: linear
+page tables, or	a software-managed TLB. While the former is simpler to program,
+the latter more closely corresponds to what current machines support.
+</para>
+<para>
+In both cases, when translating an address, the processor breaks the 32-bit
+virtual address into a virtual page number (VPN) and a page offset. Since the
+processor's page size is 1KB, the offset is 10 bits wide and the VPN is 22 bits
+wide. The processor then translates the virtual page number into a translation
+entry.
+</para>
+<para>
+Each translation entry (see the <type>TranslationEntry</type> class) contains six
+fields: a valid bit, a read-only bit, a used bit, a dirty bit, a 22-bit VPN,
+and a 22-bit physical page number (PPN). The valid bit and read-only bit are
+set by the kernel and read by the processor. The used and dirty bits are set
+by the processor, and read and cleared by the kernel.
+</para>
+
+<sect3>
+<title>Linear Page Tables</title>
+<para>
+When in linear page table mode, the processor uses the VPN to index into an
+array of translation entries. This array is specified by calling
+<function>setPageTable()</function>. If, in translating a VPN, the VPN is greater than or
+equal to the length of the page table, or the VPN is within range but the
+corresponding translation entry's valid bit is clear, then a page fault occurs.
+</para>
+<para>
+In general, each user process will have its own private page table. Thus, each
+process switch requires calling <function>setPageTable()</function>. On a real machine,
+the page table pointer would be stored in a special processor register.
+</para>
+</sect3>
+<sect3>
+<title>Software-Managed TLB</title>
+<para>
+When in TLB mode, the processor maintains a small array of translation entries
+that the kernel can read/write using <function>readTLBEntry()</function> and
+<function>writeTLBEntry()</function>. On each address translation, the processor searches
+the entire TLB for the first entry whose VPN matches.
+</para>
+</sect3>
+</sect2>
+
+</sect1>
+
+<sect1>
+<title>User-Level Processes</title>
+<para>
+Nachos runs each user program in its own private address space. Nachos can run
+any COFF MIPS binaries that meet a few restrictions. Most notably, the code
+must only make system calls that Nachos understands. Also, the code must not
+use any floating point instructions, because the Nachos MIPS simulator does not
+support coprocessors.
+</para>
+
+<sect2>
+<title>Loading COFF Binaries</title>
+
+<para>
+COFF (Common Object File Format) binaries contain a lot of information, but
+very little of it is actually relevent to Nachos programs. Further, Nachos
+provides a COFF loader class, <type>nachos.machine.Coff</type>, that abstracts away
+most of the details. But a few details are still important.
+
+</para><para>
+A COFF binary is broken into one or more <emphasis>sections</emphasis>. A section is a
+contiguous chunk of virtual memory, all the bytes of which have similar
+attributes (code vs. data, read-only vs. read-write, initialized vs.
+uninitialized). When Nachos loads a program, it creates a new processor, and
+then copies each section into the program's virtual memory, at some start
+address specified by the section. A COFF binary also specifies an initial value
+for the PC register. The kernel must initialize this register, as well as the
+stack pointer, and then instruct the processor to start executing the program.
+
+</para><para>
+The <type>Coff</type> constructor takes one argument, an <type>OpenFile</type>
+referring to the MIPS binary file. If there is any error parsing the headers
+of the specified binary, an <type>EOFException</type> is thrown. Note that if
+this constructor succeeds, the file belongs to the <type>Coff</type> object; it
+should not be closed or accessed anymore, except through <type>Coff</type>
+operations.
+
+</para><para>
+There are four <type>Coff</type> methods:
+</para>
+
+<itemizedlist>
+  <listitem><para><function>getNumSections()</function> returns the number of
+  sections in this binary.
+  </para></listitem>
+  <listitem><para><function>getSection()</function> takes a section number, between <constant>0</constant> and
+  <function>getNumSections() - 1</function>, and returns a <type>CoffSection</type> object
+  representing the section. This class is described below.
+  </para></listitem>
+  <listitem><para><function>getEntryPoint()</function> returns the value with which to initialize the
+  program counter.
+  </para></listitem>
+  <listitem><para><function>close()</function> releases any resources allocated by the loader. This
+  includes closing the file passed to the constructor.
+  </para></listitem>
+</itemizedlist>
+
+<para>
+The <type>CoffSection</type> class allows Nachos to access a single section within
+a COFF executable. Note that while the MIPS cross-compiler generates a variety
+of sections, the only important distinction to the Nachos kernel is that some
+sections are read-only (i.e. the program should never write to any byte in the
+section), while some sections are read-write (i.e. non-<literal>const</literal> data).
+There are four methods for accessing COFF sections:
+</para>
+
+<itemizedlist>
+  <listitem><para><function>getFirstVPN()</function> returns the first virtual page number occupied by
+  the section.
+  </para></listitem>
+  <listitem><para><function>getLength()</function> returns the number of pages occupied by the
+  section. This section therefore occupies pages <function>getFirstVPN()</function> through
+  <function>getFirstVPN() + getLength() - 1</function>. Sections should never
+  overlap.
+  </para></listitem>
+  <listitem><para><function>isReadOnly()</function> returns true if and only if the section is
+  read-only (i.e. it only contains code or constant data).
+  </para></listitem>
+  <listitem><para><function>loadPage()</function> reads a page of the section into main memory. It
+  takes two arguments, the page within the section to load (in the
+  range <constant>0</constant> through <function>getLength() - 1</function>) and the physical page of memory
+  to write.
+  </para></listitem>
+</itemizedlist>
+</sect2>
+
+<sect2>
+<title>Starting a Process</title>
+
+<para>
+The kernel starts a process in two steps. First, it calls
+<function>UserProcess.newUserProcess()</function> to instantiate a process of the
+appropriate class. This is necessary because the process class changes as more
+functionality is added to each process. Second, it calls <function>execute()</function> to
+load and execute the program, passing the name of the file containing the
+binary and an array of arguments.
+
+</para><para>
+<function>execute()</function> in turn takes two steps. It first loads the program into the
+process's address space by calling <function>load()</function>. It then forks a new thread,
+which initializes the processor's registers and address translation information
+and then calls <function>Machine.processor().run()</function> to start executing user code.
+
+</para><para>
+<function>load()</function> opens the executable's file, instantiates a COFF loader to
+process it, verifies that the sections are contiguously placed in virtual
+memory, verifies that the arguments will fit within a single page, calculates
+the size of the program in pages (including the stack and arguments), calls
+<function>loadSections()</function> to actually load the contents of each section, and
+finally writes the command line arguments to virtual memory.
+
+</para><para>
+<function>load()</function> lays out the program in virtual memory as follows: first,
+starting at virtual address 0, the sections of the executable occupy a
+contiguous region of virtual memory. Next comes the stack, the size of which
+is determined by the variable <varname>stackPages</varname>. Finally, one page is
+reserved for command line arguments (that <varname>argv</varname> array).
+
+</para><para>
+<function>loadSections()</function> allocates physical memory for the program and
+initializes its page table, and then loads sections to physical memory (though
+for the VM project, this loading is done lazily, delayed until pages are
+demanded). This is separated from the rest of <function>load()</function> because the
+loading mechanism depends on the details of the paging system.
+
+</para><para>
+In the code you are given, Nachos assumes that only a single process can exist
+at any given time. Therefore, <function>loadSections()</function> assumes that no one else
+is using physical memory, and it initializes its page table so as to map
+virtual memory addresses directly to physical memory addresses, without any
+translation (i.e. virtual address <varname>n</varname> maps to physical address <varname>n</varname>).
+
+</para><para>
+The method <function>initRegisters()</function> zeros out the processor's registers, and
+then initializes the program counter, the stack pointer, and the two argument
+registers (which hold <varname>argc</varname> and <varname>argv</varname>) with the values computed
+by <function>load()</function>. <function>initRegisters()</function> is called exactly once by the
+thread forked in <function>execute()</function>.
+</para>
+
+</sect2>
+
+<sect2>
+<title>User Threads</title>
+
+<para>
+
+User threads (that is, kernel threads that will be used to run user code)
+require additional state. Specifically, whenever a user thread starts running,
+it must restore the processor's registers, and possibly restore some address
+translation information as well. Right before a context switch, a user thread
+needs to save the processor's registers.
+
+</para><para>
+To accomplish this, there is a new thread class, <type>UThread</type>, that extends
+<type>KThread</type>. It is necessary to know which process, if any, the current
+thread belongs to. Therefore each <type>UThread</type> is bound to a single
+process.
+
+</para><para>
+<type>UThread</type> overrides <function>saveState()</function> and
+<function>restoreState()</function> from <type>KThread</type> so as to save/restore the
+additional information. These methods deal only with the user register set,
+and then direct the current process to deal with process-level state (i.e.
+address translation information). This separation makes it possible to allow
+multiple threads to run within a single process.
+</para>
+
+</sect2>
+
+<sect2>
+<title>System Calls and Exception Handling</title>
+
+<para>
+
+User programs invoke system calls by executing the MIPS <literal>syscall</literal>
+instruction, which causes the Nachos kernel exception handler to be invoked
+(with the cause register set to <constant>Processor.exceptionSyscall</constant>). The
+kernel must first tell the processor where the exception handler is by calling
+<function>Machine.processor().setExceptionHandler()</function>.
+
+</para><para>
+The default Kernel exception handler, <function>UserKernel.exceptionHandler()</function>,
+reads the value of the processor's cause register, determines the current
+process, and invokes <function>handleException</function> on the current process, passing
+the cause of the exception as an argument. Again, for a syscall, this value
+will be <constant>Processor.exceptionSyscall</constant>.
+
+</para><para>
+The <literal>syscall</literal> instruction indicates a system call is requested, but
+doesn't indicate which system call to perform. By convention, user programs
+place the value indicating the particular system call desried into MIPS
+register <varname>r2</varname> (the first return register, <varname>v0</varname>) before executing
+the <literal>syscall</literal> instruction. Arguments to the system call, when necessary,
+are passed in MIPS registers <varname>r4</varname> through <varname>r7</varname> (i.e. the
+argument registers, <varname>a0 ... a3</varname>), following the standard C procedure
+call convention. Function return values, including system call return values,
+are expected to be in register <varname>r2</varname> (<varname>v0</varname>) on return.
+
+</para>
+<note><para>
+When accessing user memory from within the exception handler (or within
+Nachos in general), user-level addresses cannot be referenced directly. Recall
+that user-level processes execute in their own private address spaces, which
+the kernel cannot reference directly. Use <function>readVirtualMemory()</function>,
+<function>readVirtualMemoryString()</function>, and <function>writeVirtualMemory()</function> to
+make use of pointer arguments to syscalls.
+</para></note>
+
+</sect2>
+<!--
+<sect2>
+<title>MIPS Processor</title>
+<para>
+-->
+</sect1>
+
+</article>
